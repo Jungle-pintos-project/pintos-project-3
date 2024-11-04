@@ -87,14 +87,27 @@ timer_elapsed (int64_t then) {
 	return timer_ticks () - then;
 }
 
+// 1. busy wait
+// ready - selected by scheduler -> running - yield() -> ready -> ...
+// 2. sleep wakeup
+// ready - selected by scheduler -> running - sleep() -> blocked - wakeup() -> ready -> ...
+
 /* Suspends execution for approximately TICKS timer ticks. */
 void
 timer_sleep (int64_t ticks) {
+	// records the current time 
 	int64_t start = timer_ticks ();
 
 	ASSERT (intr_get_level () == INTR_ON);
-	while (timer_elapsed (start) < ticks)
-		thread_yield ();
+	
+	// // 1. busy wait
+	// // switch between ready state and running state
+	// while (timer_elapsed (start) < ticks)
+	// 	// release CPU
+		// thread_yield (); 
+	
+	// 2. sleep wakeup
+	thread_sleep(start + ticks);
 }
 
 /* Suspends execution for approximately MS milliseconds. */
@@ -126,6 +139,30 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED) {
 	ticks++;
 	thread_tick ();
+
+	/**
+	 * check sleep list and the global tick.
+	 * find any threads to wake up,
+	 * move them to the ready list if necessary.
+	 * update the global tick.
+	 */
+
+	if (list_empty(&sleep_list)) {
+		return;
+	}
+	struct list_elem *le = list_begin(&sleep_list);
+	struct thread *t;
+
+	while (le != list_end(&sleep_list)) {
+		t = list_entry(le, struct thread, elem);
+
+		if (t->wakeup_tick < ticks) {
+			le = list_remove(le);
+			thread_unblock(t);
+			continue;
+		} 
+		le = list_next(le);
+	}
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer

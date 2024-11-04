@@ -27,8 +27,10 @@
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
 static struct list ready_list;
+struct list sleep_list;
 
 /* Idle thread. */
+// 유휴 스레드
 static struct thread *idle_thread;
 
 /* Initial thread, the thread running init.c:main(). */
@@ -109,6 +111,7 @@ thread_init (void) {
 	lock_init (&tid_lock);
 	list_init (&ready_list);
 	list_init (&destruction_req);
+	list_init (&sleep_list);
 
 	/* Set up a thread structure for the running thread. */
 	initial_thread = running_thread ();
@@ -195,6 +198,7 @@ thread_create (const char *name, int priority,
 
 	/* Call the kernel_thread if it scheduled.
 	 * Note) rdi is 1st argument, and rsi is 2nd argument. */
+
 	t->tf.rip = (uintptr_t) kernel_thread;
 	t->tf.R.rdi = (uint64_t) function;
 	t->tf.R.rsi = (uint64_t) aux;
@@ -206,6 +210,17 @@ thread_create (const char *name, int priority,
 
 	/* Add to run queue. */
 	thread_unblock (t);
+	/**
+	 * compare the priorities of the currently running thread
+	 * and the newly inserted one. Yield the CPU if the newly
+	 * arriving thread has higher priority
+	 */
+	
+	struct thread *curr = thread_current();
+
+	if(!list_empty(&ready_list) && curr->priority < list_entry(list_front(&ready_list), struct thread, elem)->priority) {
+		thread_yield();
+	}
 
 	return tid;
 }
@@ -224,6 +239,10 @@ thread_block (void) {
 	schedule ();
 }
 
+bool cmp_thread_priority (const struct list_elem *a, const struct list_elem *b, void *aux) {
+	return list_entry(a, struct thread, elem)->priority > list_entry(b, struct thread, elem)->priority;
+}
+
 /* Transitions a blocked thread T to the ready-to-run state.
    This is an error if T is not blocked.  (Use thread_yield() to
    make the running thread ready.)
@@ -240,7 +259,10 @@ thread_unblock (struct thread *t) {
 
 	old_level = intr_disable ();
 	ASSERT (t->status == THREAD_BLOCKED);
-	list_push_back (&ready_list, &t->elem);
+
+	// list_push_back (&ready_list, &t->elem);
+	list_insert_ordered(&ready_list, &t->elem, cmp_thread_priority, NULL);
+
 	t->status = THREAD_READY;
 	intr_set_level (old_level);
 }
@@ -254,6 +276,7 @@ thread_name (void) {
 /* Returns the running thread.
    This is running_thread() plus a couple of sanity checks.
    See the big comment at the top of thread.h for details. */
+// curr thread 반환
 struct thread *
 thread_current (void) {
 	struct thread *t = running_thread ();
@@ -294,24 +317,77 @@ thread_exit (void) {
 
 /* Yields the CPU.  The current thread is not put to sleep and
    may be scheduled again immediately at the scheduler's whim. */
+// 실행할 새 스레드를 선택하는 스케쥴러에게 CPU를 제공
 void
 thread_yield (void) {
-	struct thread *curr = thread_current ();
+	struct thread *curr;
 	enum intr_level old_level;
 
 	ASSERT (!intr_context ());
 
-	old_level = intr_disable ();
+	old_level = intr_disable (); 
+	
+	curr = thread_current ();
+
 	if (curr != idle_thread)
-		list_push_back (&ready_list, &curr->elem);
+		list_insert_ordered (&ready_list, &curr->elem, cmp_thread_priority, NULL);
+		
 	do_schedule (THREAD_READY);
 	intr_set_level (old_level);
+}
+
+// bool cmp_thread_tick (const struct list_elem *a, const struct list_elem *b, void *aux) {
+// 	struct thread *ta = list_entry(a, struct thread, elem);
+// 	struct thread *tb = list_entry(b, struct thread, elem);
+// 	return ta->wakeup_tick < tb->wakeup_tick;
+// }
+
+void
+thread_sleep (int64_t ticks) {
+	/** 
+	 * 만약 curr thread 이 idle thread 가 아니라면 caller thread 를 BLOCKED 상태로 변경
+	 * wakeup 을 위해 local tick 을 추가하고
+	 * 필요한 경우 global tick 을 업데이트하고, schedule() 을 호출한다.
+	 * 스레드를 조작할때에는 인터럽트를 비활성화해라
+	 * 
+	 * if the current thread is not idle thread, 
+	 * change the state of the caller thread to BLOCKED
+	 * store the local tick to wake up, 
+	 * update the global tick if necessary, and call schedule().
+	 * 
+	 * when you manipulate thread list, disable interrupt!
+	 */
+	struct thread *curr;
+	enum intr_level old_level;
+
+	// disable interrupt
+	old_level = intr_disable (); 
+
+	curr = thread_current ();
+	// store the local tick
+	curr->wakeup_tick = ticks;
+	
+	// list_insert_ordered(&sleep_list, &curr->elem, cmp_thread_tick, NULL);
+	list_push_back(&sleep_list, &curr->elem);
+	// if (curr != idle_thread) {
+		thread_block();
+	// }
+	intr_set_level(old_level);
 }
 
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
 thread_set_priority (int new_priority) {
-	thread_current ()->priority = new_priority;
+	struct thread *cur = thread_current();
+	cur->priority = new_priority;
+	
+	if(list_empty(&ready_list)) {
+		return;
+	}
+
+	if(cur->priority < list_entry(list_front(&ready_list), struct thread, elem)->priority) {
+		thread_yield();
+	}
 }
 
 /* Returns the current thread's priority. */
@@ -409,6 +485,7 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->tf.rsp = (uint64_t) t + PGSIZE - sizeof (void *);
 	t->priority = priority;
 	t->magic = THREAD_MAGIC;
+	t->wakeup_tick = 0;
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
@@ -525,6 +602,7 @@ thread_launch (struct thread *th) {
  * This function modify current thread's status to status and then
  * finds another thread to run and switches to it.
  * It's not safe to call printf() in the schedule(). */
+// do context switch
 static void
 do_schedule(int status) {
 	ASSERT (intr_get_level () == INTR_OFF);
