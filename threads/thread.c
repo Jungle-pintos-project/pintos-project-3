@@ -336,11 +336,9 @@ thread_yield (void) {
 	intr_set_level (old_level);
 }
 
-// bool cmp_thread_tick (const struct list_elem *a, const struct list_elem *b, void *aux) {
-// 	struct thread *ta = list_entry(a, struct thread, elem);
-// 	struct thread *tb = list_entry(b, struct thread, elem);
-// 	return ta->wakeup_tick < tb->wakeup_tick;
-// }
+bool cmp_thread_tick (const struct list_elem *a, const struct list_elem *b, void *aux) {
+	return list_entry(a, struct thread, elem)->wakeup_tick < list_entry(b, struct thread, elem)->wakeup_tick;
+}
 
 void
 thread_sleep (int64_t ticks) {
@@ -367,8 +365,8 @@ thread_sleep (int64_t ticks) {
 	// store the local tick
 	curr->wakeup_tick = ticks;
 	
-	// list_insert_ordered(&sleep_list, &curr->elem, cmp_thread_tick, NULL);
-	list_push_back(&sleep_list, &curr->elem);
+	list_insert_ordered(&sleep_list, &curr->elem, cmp_thread_tick, NULL);
+	// list_push_back(&sleep_list, &curr->elem);
 	// if (curr != idle_thread) {
 		thread_block();
 	// }

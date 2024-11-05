@@ -77,7 +77,7 @@ timer_ticks (void) {
 	int64_t t = ticks;
 	intr_set_level (old_level);
 	barrier ();
-	return t;
+	return t-1;
 }
 
 /* Returns the number of timer ticks elapsed since THEN, which
