@@ -44,7 +44,6 @@
 void
 sema_init (struct semaphore *sema, unsigned value) {
 	ASSERT (sema != NULL);
-
 	sema->value = value;
 	list_init (&sema->waiters);
 }
@@ -151,6 +150,11 @@ sema_test_helper (void *sema_) {
 	}
 }
 
+
+bool cmp_thread_tick (const struct list_elem *a, const struct list_elem *b, void *aux) {
+	return list_entry(a, struct thread, elem)->wakeup_tick < list_entry(b, struct thread, elem)->wakeup_tick;
+}
+
 /* Initializes LOCK.  A lock can be held by at most a single
    thread at any given time.  Our locks are not "recursive", that
    is, it is an error for the thread currently holding a lock to
@@ -169,7 +173,7 @@ sema_test_helper (void *sema_) {
 void
 lock_init (struct lock *lock) {
 	ASSERT (lock != NULL);
-
+	
 	lock->holder = NULL;
 	sema_init (&lock->semaphore, 1);
 }

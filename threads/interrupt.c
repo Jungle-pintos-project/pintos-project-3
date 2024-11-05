@@ -270,6 +270,11 @@ intr_context (void) {
    interrupt handler to yield to a new process just before
    returning from the interrupt.  May not be called at any other
    time. */
+
+/**
+ * 외부 인터럽트 처리 중, 인터럽트 핸들러가 종료되기 직전에 
+ * CPU를 양보해 다른 스레드로 전환(yield) 하도록 지시하는 역할
+ */
 void
 intr_yield_on_return (void) {
 	ASSERT (intr_context ());

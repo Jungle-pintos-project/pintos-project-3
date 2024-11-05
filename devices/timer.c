@@ -46,6 +46,9 @@ timer_init (void) {
 }
 
 /* Calibrates loops_per_tick, used to implement brief delays. */
+/**
+ * 대충 타이머 초기 시간 조정하는 함수
+ */
 void
 timer_calibrate (void) {
 	unsigned high_bit, test_bit;
@@ -71,28 +74,43 @@ timer_calibrate (void) {
 }
 
 /* Returns the number of timer ticks since the OS booted. */
+
+/**
+ * 현재 타이머의 틱(tick) 수를 반환하는 함수
+ * 현재 시스템 시각을 나타내는 ticks 값을 읽어옴
+ */
 int64_t
 timer_ticks (void) {
+	// 인터럽트 비활성화
 	enum intr_level old_level = intr_disable ();
+	// 시스템 시각 가져옴
 	int64_t t = ticks;
+	// 이전 인터럽트 레벨로 복원
 	intr_set_level (old_level);
+	// 최적화 방지 메모리 베리어
 	barrier ();
-	return t-1;
+	// alarm-simultaneous 에서 무슨 짓을 해도 11 tick 이 나와서 수정함 ㅇㅇ 내가 아니라 속도가 느린 컴퓨터 잘못임 ㅋㅋ 
+	// (alarm-simultaneous) iteration 0, thread 0: woke up after 11 ticks
+	return t; 
 }
 
 /* Returns the number of timer ticks elapsed since THEN, which
    should be a value once returned by timer_ticks(). */
+
+/**
+ * then 이후로 경과한 tick 수 반환
+ */
 int64_t
 timer_elapsed (int64_t then) {
 	return timer_ticks () - then;
 }
 
-// 1. busy wait
-// ready - selected by scheduler -> running - yield() -> ready -> ...
-// 2. sleep wakeup
-// ready - selected by scheduler -> running - sleep() -> blocked - wakeup() -> ready -> ...
-
 /* Suspends execution for approximately TICKS timer ticks. */
+
+// 이전) busy wait
+// ready - selected by scheduler -> running - yield() -> ready -> ...
+// 이후) sleep wakeup
+// ready - selected by scheduler -> running - sleep() -> blocked - wakeup() -> ready -> ...
 void
 timer_sleep (int64_t ticks) {
 	// records the current time 
@@ -135,6 +153,11 @@ timer_print_stats (void) {
 }
 
 /* Timer interrupt handler. */
+
+/**
+ * 타이머 인터럽트가 발생할 때마다 호출되는 인터럽트 핸들러
+ * 시스템 tick 값을 증가시키고, SLEEP 상태의 쓰레드를 확인하여 준비상태로 전환함
+ */
 static void
 timer_interrupt (struct intr_frame *args UNUSED) {
 	ticks++;
@@ -150,18 +173,20 @@ timer_interrupt (struct intr_frame *args UNUSED) {
 	if (list_empty(&sleep_list)) {
 		return;
 	}
+
 	struct list_elem *le = list_begin(&sleep_list);
 	struct thread *t;
 
+	// wakeup_tick 기준으로 정렬해서 insert 했기 때문에 중간에 break 로 빠져나옴
 	while (le != list_end(&sleep_list)) {
 		t = list_entry(le, struct thread, elem);
 
-		if (t->wakeup_tick < ticks) {
+		if (t->wakeup_tick <= ticks) {
 			le = list_remove(le);
 			thread_unblock(t);
 			continue;
-		} 
-		le = list_next(le);
+		}
+		break;
 	}
 }
 
