@@ -248,11 +248,8 @@ thread_create (const char *name, int priority,
 	 * arriving thread has higher priority
 	 */
 	
-	// 실행중인 쓰레드
-	struct thread *curr = thread_current();
-
 	// 새로 들어온 쓰레드가 실행중인 쓰레드보다 우선순위가 높으면
-	if(!list_empty(&ready_list) && curr->priority < t->priority) {
+	if(!list_empty(&ready_list) && thread_current()->priority < t->priority) {
 		// 새 쓰레드 선택 ㄱㄱ
 		thread_yield();
 	}
@@ -442,15 +439,18 @@ thread_sleep (int64_t ticks) {
  */
 void
 thread_set_priority (int new_priority) {
-	struct thread *cur = thread_current();
-	cur->priority = new_priority;
-	
+	thread_current()->priority = new_priority;
+	preemption();
+}
+
+void
+preemption (void) {
 	if(list_empty(&ready_list)) {
 		return;
 	}
 
 	// 실행중인 쓰레드의 우선순위가 바뀌면 자연스럽게 ready list 의 쓰레드가 우선순위가 더 높아질 수 잇음
-	if(cur->priority < list_entry(list_front(&ready_list), struct thread, elem)->priority) {
+	if(thread_current()->priority < list_entry(list_front(&ready_list), struct thread, elem)->priority) {
 		thread_yield();
 	}
 }
@@ -551,6 +551,7 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->priority = priority;
 	t->magic = THREAD_MAGIC;
 
+	t->origin_priority = priority;
 	t->wait_on_lock;
 	t->donations;
 	t->d_elem;

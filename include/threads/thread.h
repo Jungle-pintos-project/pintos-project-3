@@ -91,7 +91,8 @@ struct thread {
 	enum thread_status status;          /* Thread state. */
 	char name[16];                      /* Name (for debugging purposes). */
 	int priority;                       /* Priority. */
-	
+	int origin_priority;
+
 	// priority Donation
 	struct lock *wait_on_lock;
 	struct list donations;
@@ -141,6 +142,12 @@ const char *thread_name (void);
 
 void thread_exit (void) NO_RETURN;
 void thread_yield (void);
+
+// add
+extern void preemption (void);
+
+// add
+extern bool cmp_thread_priority (const struct list_elem *a, const struct list_elem *b, void *aux);
 
 int thread_get_priority (void);
 void thread_set_priority (int);
