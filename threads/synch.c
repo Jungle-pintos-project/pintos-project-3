@@ -203,21 +203,19 @@ lock_acquire (struct lock *lock) {
 	ASSERT (!intr_context ());
 	ASSERT (!lock_held_by_current_thread (lock));
 
-	// struct thread *cur = thread_current();
+	struct thread *cur = thread_current();
 
-	// if(lock->holder != NULL) {
-	// 	cur->wait_on_lock = lock;
-	// 	if (lock->holder->priority < cur->priority) {
-	// 		lock->holder->priority = cur->priority;
-	// 	}
-	// }
+	if(lock->holder != NULL) {
+		cur->wait_on_lock = lock;
+		list_insert_ordered(&lock->holder->donations, &cur->d_elem, cmp_thread_donations_priority, NULL);
+		while(cur->wait_on_lock != NULL) {
+			cur->wait_on_lock->holder->priority = cur->priority;
+			cur = cur->wait_on_lock->holder;
+		}
+	}
 
-	// lock->holder = t;
-	// struct thread *w_thread = list_entry(list_front(&lock->semaphore.waiters), struct thread, elem);
-	// if(lock->holder->priority < w_thread->priority) {
-	// 	lock->holder->priority = w_thread->priority;
-	// }
 	sema_down (&lock->semaphore);
+	thread_current()->wait_on_lock = NULL;
 	lock->holder = thread_current();
 }
 
@@ -250,6 +248,30 @@ void
 lock_release (struct lock *lock) {
 	ASSERT (lock != NULL);
 	ASSERT (lock_held_by_current_thread (lock));
+	
+	if(!list_empty(&thread_current()->donations)) {
+		struct list_elem *cur = list_front(&thread_current()->donations);
+		while(cur != list_tail(&thread_current()->donations)) {
+			struct thread *t = list_entry(cur, struct thread, d_elem);
+			if (t->wait_on_lock == lock) {
+				t->wait_on_lock = NULL;
+				cur = list_remove(cur);
+				continue;
+			}
+			cur = list_next(cur);		
+		}
+	}
+	
+	struct thread *cur = thread_current();
+	cur->priority = cur->origin_priority;
+
+	if (!list_empty(&cur->donations)) {
+		list_sort(&cur->donations, cmp_thread_donations_priority, NULL);
+		struct thread *t = list_entry(list_front(&cur->donations), struct thread, d_elem);
+		if (cur->priority < t->priority) {
+			cur->priority = t->priority;
+		}
+	}
 
 	lock->holder = NULL;
 	sema_up (&lock->semaphore);
@@ -336,7 +358,6 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED) {
 	ASSERT (lock != NULL);
 	ASSERT (!intr_context ());
 	ASSERT (lock_held_by_current_thread (lock));
-
 	if (!list_empty (&cond->waiters)) {
 		list_sort(&cond->waiters, cmp_semaphore_waiters_priority, NULL);
 		sema_up (&list_entry (list_pop_front (&cond->waiters),

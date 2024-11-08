@@ -82,6 +82,14 @@ static tid_t allocate_tid (void);
 // setup temporal gdt first.
 static uint64_t gdt[3] = { 0, 0x00af9a000000ffff, 0x00cf92000000ffff };
 
+bool cmp_thread_priority (const struct list_elem *a, const struct list_elem *b, void *aux) {
+	return list_entry(a, struct thread, elem)->priority > list_entry(b, struct thread, elem)->priority;
+}
+
+bool cmp_thread_donations_priority (const struct list_elem *a, const struct list_elem *b, void *aux) {
+	return list_entry(a, struct thread, d_elem)->priority > list_entry(b, struct thread, d_elem)->priority;
+}
+
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
    general and it is possible in this case only because loader.S
@@ -238,7 +246,7 @@ thread_create (const char *name, int priority,
 	t->tf.ss = SEL_KDSEG;
 	t->tf.cs = SEL_KCSEG;
 	t->tf.eflags = FLAG_IF;
-
+	
 	/* Add to run queue. */
 	thread_unblock (t);
 
@@ -249,10 +257,41 @@ thread_create (const char *name, int priority,
 	 */
 	
 	// 새로 들어온 쓰레드가 실행중인 쓰레드보다 우선순위가 높으면
-	if(!list_empty(&ready_list) && thread_current()->priority < t->priority) {
-		// 새 쓰레드 선택 ㄱㄱ
-		thread_yield();
-	}
+	// if (aux) {
+	// 	enum intr_level old_level;
+	// 	struct lock *lock = aux;
+	// 	if (lock->holder == NULL) {
+	// 		lock->holder = t;
+	// 	} else {
+	// 		old_level = intr_disable ();
+	// 		list_insert_ordered(&lock->semaphore.waiters, &t->elem, cmp_thread_priority, NULL);
+	// 		intr_set_level (old_level);
+	// 	}
+	// }
+	// 	struct thread *cur = thread_current();
+
+	// 	if(lock->holder != NULL) {
+	// 		list_insert_ordered(&lock->holder->donations, &cur->d_elem, cmp_thread_donations_priority, NULL);
+	// 		cur->wait_on_lock = lock;
+	// 		while(cur->wait_on_lock == NULL) {
+	// 			cur->wait_on_lock->holder->priority = cur->priority;
+	// 			cur = cur->wait_on_lock->holder;
+	// 		}
+	// 	}
+
+	preemption();
+	// if(!list_empty(&ready_list) && thread_current()->priority < t->priority) {
+	// 	// 새 쓰레드 선택 ㄱㄱ
+	// 	thread_yield();
+	// }
+
+	// if (!list_empty(&cur->donations)) {
+	// 	list_sort(&cur->donations, cmp_thread_donations_priority, NULL);
+	// 	struct thread *t = list_entry(list_front(&cur->donations), struct thread, d_elem);
+	// 	if (cur->priority < t->priority) {
+	// 		cur->priority = t->priority;
+	// 	}
+	// }
 
 	return tid;
 }
@@ -277,10 +316,6 @@ thread_block (void) {
 	thread_current ()->status = THREAD_BLOCKED;
 	// curr 쓰레드를 재워났으니 다음 실행할거 찾음
 	schedule ();
-}
-
-bool cmp_thread_priority (const struct list_elem *a, const struct list_elem *b, void *aux) {
-	return list_entry(a, struct thread, elem)->priority > list_entry(b, struct thread, elem)->priority;
 }
 
 /* Transitions a blocked thread T to the ready-to-run state.
@@ -309,7 +344,9 @@ thread_unblock (struct thread *t) {
 	// list_push_back (&ready_list, &t->elem);
 	// 우선순위가 높은 애가 먼저 나오게 정렬 후 넣음
 	list_insert_ordered(&ready_list, &t->elem, cmp_thread_priority, NULL);
-
+	if (t->priority < thread_current()->priority) {
+		thread_yield();
+	}
 	t->status = THREAD_READY;
 	intr_set_level (old_level);
 }
@@ -439,7 +476,17 @@ thread_sleep (int64_t ticks) {
  */
 void
 thread_set_priority (int new_priority) {
-	thread_current()->priority = new_priority;
+	struct thread *cur = thread_current();
+	cur->origin_priority = new_priority;
+	cur->priority = cur->origin_priority;
+
+	if (!list_empty(&cur->donations)) {
+		list_sort(&cur->donations, cmp_thread_donations_priority, NULL);
+		struct thread *t = list_entry(list_front(&cur->donations), struct thread, d_elem);
+		if (cur->priority < t->priority) {
+			cur->priority = t->priority;
+		}
+	}
 	preemption();
 }
 
@@ -552,9 +599,8 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->magic = THREAD_MAGIC;
 
 	t->origin_priority = priority;
-	t->wait_on_lock;
-	t->donations;
-	t->d_elem;
+	t->wait_on_lock = NULL;
+	list_init(&t->donations);
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should

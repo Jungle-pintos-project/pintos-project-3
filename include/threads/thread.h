@@ -148,6 +148,7 @@ extern void preemption (void);
 
 // add
 extern bool cmp_thread_priority (const struct list_elem *a, const struct list_elem *b, void *aux);
+extern bool cmp_thread_donations_priority (const struct list_elem *a, const struct list_elem *b, void *aux);
 
 int thread_get_priority (void);
 void thread_set_priority (int);
