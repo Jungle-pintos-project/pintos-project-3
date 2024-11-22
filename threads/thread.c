@@ -74,7 +74,6 @@ static tid_t allocate_tid (void);
 
 // #2 
 static void preempt_if_higher_priority(struct thread *t);
-static void preempt_if_lower_priority(struct thread *t);
 
 // #3
 // static bool is_higher_priority (const struct list_elem *a, const struct list_elem *b, void *aux);
@@ -183,7 +182,7 @@ thread_init (void) {
 	/* Set up a thread structure for the running thread. */
 	initial_thread = running_thread ();
 	init_thread (initial_thread, "main", PRI_DEFAULT);
-	// list_push_back(&all_list, &initial_thread->a_elem);
+	list_push_back(&all_list, &initial_thread->a_elem);
 	initial_thread->status = THREAD_RUNNING;
 	initial_thread->tid = allocate_tid ();
 	initial_thread->wakeup_tick = 0;
@@ -279,12 +278,17 @@ thread_create (const char *name, int priority,
 	t->tf.eflags = FLAG_IF;
 	
 	// list_push_back(&all_list, &t->a_elem);
+	list_push_back(&thread_current()->child_list, &t->child_elem);
+	t->fdt = palloc_get_multiple(PAL_ZERO, FDT_PAGES);
+	
+	if (t->fdt == NULL)
+		return TID_ERROR;
 
 	/* Add to run queue. */
 	thread_unblock (t);
 
 	// #2
-	preemption();
+	preempt_if_higher_priority(t);
 
 	return tid;
 }
@@ -322,10 +326,6 @@ thread_unblock (struct thread *t) { // @
 	// #2
 	// list_push_back (&ready_list, &t->elem);
 	list_insert_ordered(&ready_list, &t->elem, is_higher_priority, NULL);
-
-	// #4
-	// preempt_if_lower_priority(t);
-	
 	
 	t->status = THREAD_READY;
 	intr_set_level (old_level);
@@ -528,6 +528,13 @@ init_thread (struct thread *t, const char *name, int priority) { // @
 	t->nice = 0;
 	t->recent_cpu = 0;
 	list_push_back(&all_list, &t->a_elem);
+
+	t->exit_status = 0;
+	t->next_fd = 2;
+	sema_init(&t->wait_sema, 0);
+	sema_init(&t->load_sema, 0);
+	sema_init(&t->exit_sema, 0);
+	list_init(&t->child_list);
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
@@ -749,14 +756,19 @@ thread_wakeup (int64_t ticks) { // @
 // #2
 static void
 preempt_if_higher_priority(struct thread *t) { // @
-	if (thread_current()->priority < t->priority) {
-		thread_yield();
-	}
-}
+	if(idle_thread == thread_current())
+	return;
 
-static void
-preempt_if_lower_priority(struct thread *t) { // @
-	if (thread_current()->priority > t->priority) {
+	if(list_empty(&ready_list))
+	return;
+
+	if (thread_current()->priority < t->priority) {
+#ifdef USERPROG
+		if (intr_context()) {
+			intr_yield_on_return();
+			return;
+		} 
+#endif
 		thread_yield();
 	}
 }
@@ -867,4 +879,15 @@ mlfqs_re_calc_priority (void) {
   for (e = list_begin (&all_list); e != list_end (&all_list); e = list_next (e)) {
 		mlfqs_calc_priority(list_entry(e, struct thread, a_elem));
 	}
+}
+
+struct thread *get_thread_by_tid(tid_t tid) {
+	struct list_elem *e;
+	for (e = list_begin(&all_list); e != list_end(&all_list); e = list_next(e)) {
+		struct thread *t = list_entry(e, struct thread, a_elem);
+		if(t->tid == tid) {
+			return t;
+		}
+	}
+	return NULL;
 }

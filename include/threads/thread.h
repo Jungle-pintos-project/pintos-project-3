@@ -9,6 +9,9 @@
 #include "vm/vm.h"
 #endif
 
+#include "threads/synch.h"
+
+#define USERPROG
 
 /* States in a thread's life cycle. */
 enum thread_status {
@@ -31,6 +34,9 @@ typedef int tid_t;
 #define NICE_DEFAULT 0
 #define RECENT_CPU_DEFAULT 0
 #define LOAD_AVG_DEFAULT 0
+
+#define FDT_PAGES 3
+#define FDT_COUNT_LIMIT FDT_PAGES * (1 << 9)
 
 /* A kernel thread or user process.
  *
@@ -113,6 +119,20 @@ struct thread {
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
 
+	int exit_status;
+	struct file **fdt;
+	int next_fd;
+
+	struct intr_frame parent_if;
+	struct list child_list;
+	struct list_elem child_elem;
+
+	struct semaphore wait_sema;
+	struct semaphore load_sema;
+	struct semaphore exit_sema;
+
+	struct file *running;
+
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
 	uint64_t *pml4;                     /* Page map level 4 */
@@ -184,5 +204,8 @@ void mlfqs_inc_recent_cpu (void);
 void mlfqs_re_calc_recent_cpu (void);
 void mlfqs_re_calc_priority (void);
 bool is_sleep_list_empty(void);
+
+struct thread *get_thread_by_tid(tid_t tid);
+
 
 #endif /* threads/thread.h */
